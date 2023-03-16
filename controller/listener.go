@@ -3,7 +3,6 @@ package controller
 import (
 	"log"
 	"net"
-	"os"
 	"sync"
 )
 
@@ -46,8 +45,7 @@ func New(
 func (listenerServer *ListenerServer) Start() {
 	l, err := net.Listen(TYPE, listenerServer.Address)
 	if err != nil {
-		log.Fatal(err)
-		os.Exit(1)
+		log.Fatalf("Failed to create listener: %v", err.Error())
 	}
 	listenerServer.listener = &l
 
@@ -62,8 +60,7 @@ func (listenerServer *ListenerServer) Start() {
 			case <-listenerServer.quit:
 				log.Println("Connection listener finished")
 			default:
-				log.Fatal(err)
-				os.Exit(1)
+				log.Fatalf("Failed to accept connection: %v", err.Error())
 			}
 			return
 

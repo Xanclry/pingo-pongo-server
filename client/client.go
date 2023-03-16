@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"pingo-pongo-server/model"
@@ -14,6 +16,7 @@ const (
 type Client struct {
 	address string
 	conn    *net.TCPConn
+	reader  *bufio.Reader
 	seq_num uint32
 }
 
@@ -29,38 +32,38 @@ func (c *Client) Start() {
 	if err != nil {
 		log.Fatalf("Failed to create connection: %v", err.Error())
 	}
+	c.reader = bufio.NewReader(c.conn)
 	log.Printf("Established connection to %v", c.address)
+}
 
-	var inputString string
-	reply := make([]byte, 6)
-	for {
-		fmt.Scan(&inputString)
-		if inputString == "exit" {
-			break
-		}
-
-		err = c.send(c.buildMessage(inputString))
-		if err != nil {
-			log.Panicf("Write to server failed: %v", err.Error())
-		}
-
-		_, err := c.conn.Read(reply)
-		if err != nil {
-			log.Panicf("Write to server failed: %v", err.Error())
-		}
-		decodedResponse := model.DecodeResponse(reply)
-
-		fmt.Printf("Received \"%v\"\n", reply)
-		fmt.Printf("Decoded: %v\n", decodedResponse.String())
+func (c *Client) Send(message string) error {
+	binaryMessage := c.buildMessage(message)
+	fmt.Printf("Sending \"%v\"...\n", message)
+	_, err := c.conn.Write(binaryMessage)
+	if err != nil {
+		return err
 	}
+	return nil
+}
+
+func (c *Client) Receive() (model.Response, error) {
+	replyBinary := make([]byte, 6)
+	_, err := io.ReadAtLeast(c.reader, replyBinary, 6)
+	if err != nil {
+		return model.Response{}, err
+	}
+	decodedResponse := model.DecodeResponse(replyBinary)
+	return decodedResponse, nil
+
 }
 
 func (c *Client) Stop() {
 	err := c.conn.Close()
 	if err != nil {
 		log.Panicf("Failed to close connection: %v", err.Error())
+	} else {
+		log.Printf("Connection to %v closed", c.address)
 	}
-	log.Print("Connection closed")
 }
 
 func (c *Client) buildMessage(message string) []byte {
@@ -83,14 +86,5 @@ func (c *Client) initConnection() error {
 		return err
 	}
 	c.conn = conn
-	return nil
-}
-
-func (c *Client) send(message []byte) error {
-	fmt.Printf("Sending \"%v\"...\n", message)
-	_, err := c.conn.Write(message)
-	if err != nil {
-		return err
-	}
 	return nil
 }

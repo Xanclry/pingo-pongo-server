@@ -1,7 +1,6 @@
 package logger
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -76,7 +75,6 @@ func (l *Logger) startLoggerForClient(channel chan controller.RawMessageFromClie
 }
 
 func logMessageToFile(message controller.RawMessageFromClient, file *os.File) {
-	fmt.Printf("Received \"%v\"\n", message.Data)
 	file.WriteString(string(message.Data) + "\n")
 }
 

@@ -56,8 +56,6 @@ type Response struct {
 }
 
 func (response Response) String() string {
-	// length := calculateLengthOfStringWithLength(strconv.FormatUint(uint64(response.Seq_num), 10))
-	// return fmt.Sprintf("[%v][%v]", length, response.Seq_num)
 	return BuildStringWithLength("[" + strconv.FormatUint(uint64(response.Seq_num), 10) + "]")
 }
 
