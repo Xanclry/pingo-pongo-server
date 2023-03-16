@@ -20,24 +20,33 @@ func main() {
 
 	messagesChannel := make(chan controller.RawMessageFromClient, 1000)
 	clientDisconnectChannel := make(chan controller.ClientId, 1000)
-	go logger.StartLogger(messagesChannel, clientDisconnectChannel, &mainWaitGroup)
+
+	logger := logger.NewLogger(messagesChannel, clientDisconnectChannel, &mainWaitGroup)
+	go logger.Start()
+	// go logger.StartLogger(messagesChannel, clientDisconnectChannel, &mainWaitGroup)
 
 	listeningServer := controller.New(HOST+":"+PORT, messagesChannel, clientDisconnectChannel, &mainWaitGroup)
-	go serverControl(messagesChannel, &mainWaitGroup, &listeningServer)
+	go serverControl(messagesChannel, &mainWaitGroup, &listeningServer, &logger)
 	listeningServer.Start()
 
 	mainWaitGroup.Wait()
 
 }
 
-func serverControl(messagesChannel chan controller.RawMessageFromClient, mainWaitGroup *sync.WaitGroup, listeningServer *controller.ListenerServer) {
+func serverControl(
+	messagesChannel chan controller.RawMessageFromClient,
+	mainWaitGroup *sync.WaitGroup,
+	listeningServer *controller.ListenerServer,
+	logger *logger.Logger,
+) {
 	var command string
 	for {
 		fmt.Scan(&command)
 		switch command {
 		case "exit":
 			{
-				close(messagesChannel)
+				logger.Stop(mainWaitGroup)
+				// close(messagesChannel)
 				(*listeningServer).Stop()
 				mainWaitGroup.Done()
 				break

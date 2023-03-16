@@ -1,11 +1,11 @@
 package logger
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"pingo-pongo-server/controller"
-	"pingo-pongo-server/model"
 	"sync"
 )
 
@@ -13,40 +13,48 @@ const (
 	LOGGING_PATH = "./transaction-log/"
 )
 
-func StartLogger(
+type Logger struct {
+	NewMessageChannel       chan (controller.RawMessageFromClient)
+	ClientDisconnectChannel chan controller.ClientId
+	clientToChannelMap      *sync.Map
+	clientsWaitGroup        *sync.WaitGroup
+}
+
+func NewLogger(
 	newMessageChannel chan (controller.RawMessageFromClient),
 	clientDisconnectChannel chan controller.ClientId,
 	mainWaitGroup *sync.WaitGroup,
-) {
-	clientsWaitGroup := sync.WaitGroup{}
-	var clientToChannelMap = sync.Map{} // ClientId -> chan model.RawMessage
-	go listenToDisconnects(clientDisconnectChannel, &clientToChannelMap)
-
-	for newMessage := range newMessageChannel {
-		handleNewMessage(&clientToChannelMap, newMessage, &clientsWaitGroup)
+) Logger {
+	return Logger{
+		NewMessageChannel:       newMessageChannel,
+		ClientDisconnectChannel: clientDisconnectChannel,
+		clientToChannelMap:      &sync.Map{},
+		clientsWaitGroup:        &sync.WaitGroup{},
 	}
-
-	shutdown(&clientToChannelMap, &clientsWaitGroup, mainWaitGroup)
 }
 
-func handleNewMessage(
-	clientToChannelMap *sync.Map,
+func (l *Logger) Start() {
+	go l.listenToDisconnects()
+	for newMessage := range l.NewMessageChannel {
+		l.handleNewMessage(newMessage)
+	}
+}
+
+func (l *Logger) handleNewMessage(
 	newMessage controller.RawMessageFromClient,
-	clientsWaitGroup *sync.WaitGroup,
 ) {
-	channelForThisClient, loaded := clientToChannelMap.LoadOrStore(newMessage.ClientId, make(chan model.RawMessage, 1000))
+	channelForThisClient, loaded := l.clientToChannelMap.LoadOrStore(newMessage.ClientId, make(chan controller.RawMessageFromClient, 1000))
+	castedChannel := channelForThisClient.(chan controller.RawMessageFromClient)
 
 	if !loaded {
 		// new client
-		castedChannel := channelForThisClient.(chan model.RawMessage)
-		clientsWaitGroup.Add(1)
-		go startLoggerForClient(castedChannel, newMessage.ClientId, clientsWaitGroup)
+		l.clientsWaitGroup.Add(1)
+		go l.startLoggerForClient(castedChannel, newMessage.ClientId)
 	}
-	castedChannel := channelForThisClient.(chan model.RawMessage)
-	castedChannel <- newMessage.RawMessage
+	castedChannel <- newMessage
 }
 
-func startLoggerForClient(channel chan model.RawMessage, clientId controller.ClientId, waitGroup *sync.WaitGroup) {
+func (l *Logger) startLoggerForClient(channel chan controller.RawMessageFromClient, clientId controller.ClientId) {
 	filename, _ := filepath.Abs(LOGGING_PATH + clientId.GenerateFilename())
 
 	file, err := os.OpenFile(filename, os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
@@ -64,33 +72,31 @@ func startLoggerForClient(channel chan model.RawMessage, clientId controller.Cli
 	}
 
 	log.Printf("Logging stopped for client %v\n", clientId)
-	waitGroup.Done()
+	l.clientsWaitGroup.Done()
 }
 
-func logMessageToFile(message model.RawMessage, file *os.File) {
-	file.WriteString(message.String() + "\n")
+func logMessageToFile(message controller.RawMessageFromClient, file *os.File) {
+	fmt.Printf("Received \"%v\"\n", message.Data)
+	file.WriteString(string(message.Data) + "\n")
 }
 
-func listenToDisconnects(
-	clientDisconnectChannel chan controller.ClientId,
-	clientsMap *sync.Map,
-) {
-	for disconnect := range clientDisconnectChannel {
-		channel, loaded := clientsMap.LoadAndDelete(disconnect)
+func (l *Logger) listenToDisconnects() {
+	for disconnect := range l.ClientDisconnectChannel {
+		channel, loaded := l.clientToChannelMap.LoadAndDelete(disconnect)
 		if loaded {
-			close(channel.(chan model.RawMessage))
+			close(channel.(chan controller.RawMessageFromClient))
 		}
 	}
 }
 
-func shutdown(clientsMap *sync.Map, clientsWaitGroup *sync.WaitGroup, mainWaitGroup *sync.WaitGroup) {
-	clientsMap.Range(func(key, value any) bool {
-		castedChannel := value.(chan model.RawMessage)
+func (l *Logger) Stop(waitGroup *sync.WaitGroup) {
+	close(l.NewMessageChannel)
+	l.clientToChannelMap.Range(func(key, value any) bool {
+		castedChannel := value.(chan controller.RawMessageFromClient)
 		close(castedChannel)
 		return true
 	})
-	clientsWaitGroup.Wait()
+	l.clientsWaitGroup.Wait()
 	log.Println("Logger finished")
-	mainWaitGroup.Done()
-
+	waitGroup.Done()
 }

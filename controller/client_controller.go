@@ -2,6 +2,8 @@ package controller
 
 import (
 	"bufio"
+	"encoding/binary"
+	"io"
 	"log"
 	"net"
 	"pingo-pongo-server/model"
@@ -35,36 +37,61 @@ func (client *ClientController) Start() {
 	clientId := ClientId{client.Conn.RemoteAddr().String()}
 	reader := bufio.NewReader(client.Conn)
 	for {
-		message := ""
-		for i := 0; i < 3; i++ {
-			partOfMessage, err := reader.ReadString(']')
-			if err != nil {
-				select {
-				case <-client.quit:
-					log.Printf("Client controller for %v finished", clientId)
-					client.parentWaitGroup.Done()
-				default:
-					if err.Error() == "EOF" {
-						client.DisconnectChannel <- clientId
-						log.Printf("Client %v disconnected", clientId)
-					} else {
-						log.Panicf("Error: %+v", err.Error())
-					}
-				}
+		messageBinary, err := client.receiveMessage(reader)
 
-				return
+		if err != nil {
+			select {
+			case <-client.quit:
+				log.Printf("Client controller for %v finished", clientId)
+				client.parentWaitGroup.Done()
+			default:
+				if err.Error() == "EOF" {
+					client.DisconnectChannel <- clientId
+					client.parentWaitGroup.Done()
+					log.Printf("Client %v disconnected", clientId)
+				} else {
+					log.Panicf("Error: %+v", err.Error())
+				}
 			}
-			message = message + partOfMessage
+			return
 		}
+
+		decodedMessage := model.DecodeMessage(messageBinary)
 
 		messageFromClient := RawMessageFromClient{
-			model.ParseRawMessage(message),
+			messageBinary,
 			clientId,
 		}
+
 		client.MessagesChannel <- messageFromClient
-		client.Conn.Write([]byte(buildResponse(messageFromClient)))
+		client.sendResponse(decodedMessage)
+	}
+}
+
+func (client *ClientController) receiveMessage(reader *bufio.Reader) ([]byte, error) {
+	lengthBuffer := make([]byte, 2)
+	_, err1 := io.ReadAtLeast(reader, lengthBuffer, 2)
+	if err1 != nil {
+		return []byte{}, err1
+	}
+	messageLength := binary.LittleEndian.Uint16(lengthBuffer)
+
+	messageBuffer := make([]byte, messageLength-2)
+	_, err2 := io.ReadAtLeast(reader, messageBuffer, int(messageLength)-2)
+	if err2 != nil {
+		return []byte{}, err2
 	}
 
+	resultBuffer := make([]byte, 0)
+	resultBuffer = append(resultBuffer, lengthBuffer...)
+	resultBuffer = append(resultBuffer, messageBuffer...)
+
+	return resultBuffer, nil
+}
+
+func (client *ClientController) sendResponse(incomingMessage model.RawMessage) {
+	encodedResponse := model.EncodeResponse(buildResponse(incomingMessage))
+	client.Conn.Write([]byte(encodedResponse))
 }
 
 func (client *ClientController) Stop() {
@@ -72,7 +99,6 @@ func (client *ClientController) Stop() {
 	client.Conn.Close()
 }
 
-func buildResponse(message RawMessageFromClient) string {
-	response := model.Response{Seq_num: message.ParsedMessage.Seq_num}
-	return response.String()
+func buildResponse(message model.RawMessage) model.Response {
+	return model.Response{Seq_num: message.ParsedMessage.Seq_num}
 }

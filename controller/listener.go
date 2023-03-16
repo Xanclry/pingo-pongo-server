@@ -1,11 +1,9 @@
 package controller
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"os"
-	"pingo-pongo-server/model"
 	"sync"
 )
 
@@ -14,7 +12,7 @@ const (
 )
 
 type RawMessageFromClient struct {
-	model.RawMessage
+	Data []byte
 	ClientId
 }
 
@@ -81,7 +79,6 @@ func (listenerServer *ListenerServer) Start() {
 
 func (listenerServer *ListenerServer) Stop() {
 	log.Println("Shutting down listener")
-	fmt.Printf("handlers size: %v\n", len(*listenerServer.handlers))
 
 	for _, c := range *(listenerServer).handlers {
 		c.Stop()
@@ -91,4 +88,5 @@ func (listenerServer *ListenerServer) Stop() {
 	listenerServer.quit <- true
 	(*listenerServer.listener).Close()
 	listenerServer.mainWaitGroup.Done()
+	log.Print("Listener finished")
 }
